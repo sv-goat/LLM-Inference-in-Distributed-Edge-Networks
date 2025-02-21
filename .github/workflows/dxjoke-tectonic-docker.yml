@@ -6,6 +6,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Create source directory
+        run: mkdir -p ${{ github.workspace }}/src
       - name: Checkout repository
         uses: actions/checkout@v1
       - name: Compile
