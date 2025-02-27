@@ -14,7 +14,7 @@ jobs:
         run: |
           pwd
           ls -a
-          docker run --mount src=$GITHUB_WORKSPACE/src,target=/usr/src/tex,type=bind dxjoke/tectonic-docker:latest /bin/sh -c "main.tex" 
+          docker run --mount src=$GITHUB_WORKSPACE/src,target=/usr/src/tex,type=bind dxjoke/tectonic-docker:latest /bin/sh -c main.tex 
           echo "Ran the docker thing"
       - name: Upload pdf
         uses: actions/upload-artifact@v4
