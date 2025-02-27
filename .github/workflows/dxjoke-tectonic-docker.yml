@@ -12,7 +12,6 @@ jobs:
         run:  mkdir -p ${{ github.workspace }}/src
       - name: Compile
         run: |
-          ls -la $GITHUB_WORKSPACE/src
           docker run --mount src=$GITHUB_WORKSPACE/src,target=/usr/src/tex,type=bind dxjoke/tectonic-docker:latest /bin/sh -c main.tex 
           echo "Ran the docker thing"
       - name: Upload pdf
