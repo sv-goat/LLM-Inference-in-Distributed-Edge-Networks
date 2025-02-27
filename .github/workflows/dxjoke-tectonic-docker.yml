@@ -6,12 +6,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Create source directory
-        run: mkdir -p ${{ github.workspace }}/src
       - name: Checkout repository
-        uses: actions/checkout@v1
+        uses: actions/checkout@v1 && echo "successfully checked out"
+      - name: Create source directory
+        run: echo ${{ github.workspace }} && mkdir -p ${{ github.workspace }}/src
       - name: Compile
-        run: docker run --mount src=$GITHUB_WORKSPACE/src,target=/usr/src/tex,type=bind dxjoke/tectonic-docker:latest /bin/sh -c "main.tex"
+        run: docker run --mount src=$GITHUB_WORKSPACE/src,target=/usr/src/tex,type=bind dxjoke/tectonic-docker:latest /bin/sh -c "main.tex" && echo "Ran the docker thing"
       - name: Upload pdf
         uses: actions/upload-artifact@v4
         with:
