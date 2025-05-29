@@ -3,7 +3,7 @@ import json
 from tqdm import tqdm
 from datasets import load_dataset
 import torch
-
+import matplotlib.pyplot as plt
 from pythia_model import Pythia70Model
 
 
@@ -12,19 +12,34 @@ from pythia_model import Pythia70Model
 
 # We will use the  pile test dataset in a streaming way
 
-def extract_attentions(attention_weights, number_of_layers):
-    per_seq_ordering = [[] for _ in range(number_of_layers)]
-    for layer in range(number_of_layers):
-        # Aggregate across heads
+def extract_attentions(attention_weights, req_layers):
+    # Define a dictionary called per_seq_ordering that corresponds to the different layers mentioned in layers of interest.
+    found_orderings = {}
+    for layer in req_layers:
+      if layer == 'aggregate upto 2':
+        # 6 here stands for aggregate orderings between layers 0, 1, 2
+        # So, let us calculate that.
+        aggregate_column_wise_means = 0
+        for i in range(3):
+          aggregate_attn_weights = torch.mean(attention_weights[i], dim=1)
+          column_wise_mean = torch.mean(aggregate_attn_weights, dim=1)
+          column_wise_mean = column_wise_mean.squeeze(0)
+          aggregate_column_wise_means += column_wise_mean
+        aggregate_column_wise_means = aggregate_column_wise_means / 3
+        np_ordering = torch.argsort(aggregate_column_wise_means, descending=False).cpu().numpy()
+        found_orderings[layer] = np_ordering
+      else:
+        # ggregate across heads
         aggregate_attn_weights = torch.mean(attention_weights[layer], dim=1)
         # Mean the aggregates column wise
+        # Make sure this is doing what youa re expecting it to do.
         column_wise_mean = torch.mean(aggregate_attn_weights, dim=1)
-        # Remove batch dimension
+        # Remove batch dimensin
         column_wise_mean = column_wise_mean.squeeze(0)
         # Get the ordering
-        calculated_ordering = torch.argsort(column_wise_mean, descending=False).cpu().numpy()
-        per_seq_ordering[layer] = calculated_ordering
-    return per_seq_ordering
+        np_ordering = torch.argsort(column_wise_mean, descending=False).cpu().numpy()
+        found_orderings[layer] = np_ordering
+    return found_orderings
 
 if __name__ == "__main__":
     wikitext = load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")
@@ -33,7 +48,7 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # For seq in wiktext:
     num_layers = 6
-    layers_of_interest = [2, 3, 5]
+    layers_of_interest = [2, 5, 'aggregate upto 2']
     ratios = [r for r in range(10)]
     total_nlls = {}
     for l in layers_of_interest:
@@ -61,7 +76,7 @@ if __name__ == "__main__":
             # Get the base ppl
 
             # extract attentions
-            per_seq_ordering = extract_attentions(outputs.attentions, num_layers)
+            per_seq_ordering = extract_attentions(outputs.attentions, layers_of_interest)
 
             for l in layers_of_interest:
                 # This is ascending order of token orderings. So, initial tokens are the least important
@@ -92,6 +107,32 @@ if __name__ == "__main__":
     # Save and download the perplexity
     with open("ovr_res.json", "w") as f:
         json.dump(total_nlls, f)
+
+    # Make the plots as well and save them to disk
+    plot_data = [[] for _ in range(len(layers_of_interest))]
+    for l in range(len(layers_of_interest)):
+        for ratio in ratios:
+            plot_data[l].append(total_nlls[l][ratio])
+
+    ratios = [0.1 * r for r in ratios]
+
+    plt.clf()
+    # Line graphs
+    plt.plot(ratios, plot_data[0], label='Layer 2')
+    plt.plot(ratios, plot_data[1], label='Layer 5')
+    plt.plot(ratios, plot_data[2], label='Aggregate upto 2')
+
+    # Add legend
+    plt.legend()
+
+    # Add labels and title
+    plt.xlabel('Ratio of quantized tokens')
+    plt.ylabel('Perplexity')
+    plt.title('Perplexity at different quantization ratios according to importance at different layers')
+
+    # Save the plot
+    plt.savefig('aggregate_quantization.png')
+    plt.close()
 
 
 
