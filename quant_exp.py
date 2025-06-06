@@ -3,7 +3,6 @@ import json
 from tqdm import tqdm
 from datasets import load_dataset
 import torch
-import matplotlib.pyplot as plt
 from pythia_model import Pythia70Model
 import numpy as np
 import math
@@ -18,7 +17,7 @@ def extract_attentions(attention_weights, interesting_layers):
     # Define a dictionary called per_seq_ordering that corresponds to the different layers mentioned in layers of interest.
     calculated_orderings = {}
     for layer in interesting_layers:
-      if isinstance(layer, str) and layer.split()[0] == 'aggregate':
+      if isinstance(layer, str) and layer == 'aggregate upto 2':
         aggregate_column_wise_means = 0
         for i in range(3):
           aggregate_attn_weights = torch.mean(attention_weights[i], dim=1)
@@ -26,10 +25,7 @@ def extract_attentions(attention_weights, interesting_layers):
           column_wise_mean = column_wise_mean.squeeze(0)
           aggregate_column_wise_means += column_wise_mean
         aggregate_column_wise_means = aggregate_column_wise_means / 3
-        if layer == 'aggregate upto 2':
-          calc = torch.argsort(aggregate_column_wise_means, descending=False).cpu().numpy()
-        else:
-          calc = aggregate_column_wise_means.detach().cpu().numpy()
+        calc = torch.argsort(aggregate_column_wise_means, descending=False).cpu().numpy()
         calculated_orderings[layer] = calc
       elif layer == 'maximum aggregation':
         # Create zeroes of shape = model dimension
@@ -42,20 +38,24 @@ def extract_attentions(attention_weights, interesting_layers):
         # Get the ordering
         calc = torch.argsort(aggregate_column_wise_means, descending=False).numpy()
         calculated_orderings[layer] = calc
-      else:
+      elif layer == 'upto ratio':
         # ggregate across heads
-        # We only care about the upto ratio method in the second layer and whether or not this performs better than the base line second layer and how it compares to the overall best performance ( 5th layer )
+        # We only consider second layer for upto ratio ( boundary layer )
         aggregate_attn_weights = torch.mean(attention_weights[2], dim=1)
         # Mean the aggregates column wise
         # Make sure this is doing what youa re expecting it to do.
         column_wise_mean = torch.mean(aggregate_attn_weights, dim=1)
         # Remove batch dimensin
         column_wise_mean = column_wise_mean.squeeze(0)
-        if layer == 'upto ratio':
-          # Return the distributions itself, do not return the argsort
-          calculated_orderings[layer] = column_wise_mean.detach().cpu().numpy()
-          continue
-        # Get the ordering
+        calculated_orderings[layer] = column_wise_mean.detach().cpu().numpy()
+      else:
+        # ggregate across heads
+        aggregate_attn_weights = torch.mean(attention_weights[layer], dim=1)
+        # Mean the aggregates column wise
+        # Make sure this is doing what youa re expecting it to do.
+        column_wise_mean = torch.mean(aggregate_attn_weights, dim=1)
+        # Remove batch dimensin
+        column_wise_mean = column_wise_mean.squeeze(0)
         calc = torch.argsort(column_wise_mean, descending=False).cpu().numpy()
         calculated_orderings[layer] = calc
     return calculated_orderings
@@ -113,7 +113,6 @@ if __name__ == "__main__":
         prev_end_loc = end_loc
         if end_loc == seq_len:
             break
-
     # Compute ppl
     for l in layers_of_interest:
         for ratio in ratios:
@@ -121,5 +120,5 @@ if __name__ == "__main__":
             ppl = math.exp(total_nlls[l][ratio])
             print("Layer", l, "Ratio", 0.1 * ratio, "PPL", ppl)
 
-    with open('total_nlls_new_ppl.json', 'w') as fp:
+    with open('corrected_total_nlls_new_ppl.json', 'w') as fp:
         json.dump(total_nlls, fp)
