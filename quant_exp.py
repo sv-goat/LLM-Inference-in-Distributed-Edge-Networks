@@ -65,16 +65,21 @@ if __name__ == "__main__":
 
     # Define the model and the tokenizer
     device = "cuda"
-    ratios = [i for i in range(5)]
+    print("Using device: ", device)
+    # read the ratios from the json file
+    with open("params.json", "r") as f:
+        params = json.load(f)
+
+    ratios = params["ratios"]
     pythia_model = Pythia70Model(device, ratios)
 
     encodings = pythia_model.tokenizer("\n\n".join(wikitext["text"]), return_tensors="pt")
 
     max_length = pythia_model.model.config.max_position_embeddings
-    stride = 32
+    stride = params["stride"]
     seq_len = encodings.input_ids.size(1)
 
-    layers_of_interest = [2, 3, 5, 'aggregate upto 2', 'maximum aggregation', 'upto ratio']
+    layers_of_interest = params["layers_of_interest"]
 
     total_nlls = {}
     for l in layers_of_interest:
@@ -120,5 +125,5 @@ if __name__ == "__main__":
             ppl = math.exp(total_nlls[l][ratio])
             print("Layer", l, "Ratio", 0.1 * ratio, "PPL", ppl)
 
-    with open('corrected_total_nlls_new_ppl.json', 'w') as fp:
+    with open('exp_1.json', 'w') as fp:
         json.dump(total_nlls, fp)
