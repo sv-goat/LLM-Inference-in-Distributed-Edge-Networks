@@ -1,0 +1,6 @@
+{
+    "layers_of_interest": [1, 3, 11, 14, 17],
+  "methods": ["regular_importance", "weighted_importance", "last_row", "aggregate_till"],
+  "max_length": 512,
+  "stride": 32
+}
