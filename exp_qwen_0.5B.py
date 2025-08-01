@@ -7,6 +7,7 @@ from datasets import load_dataset
 import torch
 import math
 from qwen_layer_wise import QwenPointFiveBModel
+from transformers import AutoModelForCausalLM
 
 def get_importance_order(method, attention_map, num_layers, head_weights):
   res = []
@@ -77,20 +78,23 @@ if __name__ == "__main__":
     device = "cuda"
     qwen_model = QwenPointFiveBModel(device)
 
-    ratios = [i * 0.1 for i in range(5)]
-
     # Load the qwen exp params file
     with open("qwen_exp_params.json", "r") as f:
         qwen_exp_params = json.load(f)
 
     # Choose 5 random layers to be considered as partition from the possible layers in qwen 2 0.5 B model
     layers_of_interest = qwen_exp_params["layers_of_interest"]
+    ratios = qwen_exp_params["ratios"]
 
     # The 5 methods
     methods = qwen_exp_params["methods"]
 
     with open('attention_head_weights.pkl', 'rb') as f:
         attention_head_weights = pickle.load(f)
+
+    enthu_qwen = AutoModelForCausalLM.from_pretrained('Qwen/Qwen2-0.5B', attn_implementation="eager")
+    enthu_qwen.eval()
+    enthu_qwen.to(device)
 
     # Get the attention maps at the begining for a given sequence
     max_length = qwen_exp_params["max_length"]
@@ -108,7 +112,6 @@ if __name__ == "__main__":
     iterations = 0
 
     for begin_loc in tqdm(range(0, seq_len, stride)):
-        iterations += 1
         end_loc = min(begin_loc + max_length, seq_len)
         trg_len = end_loc - prev_end_loc
         input_ids = encodings.input_ids[:, begin_loc:end_loc].to(device)
@@ -116,16 +119,13 @@ if __name__ == "__main__":
         target_ids[:, :-trg_len] = -100
 
         with torch.no_grad():
-            base_output = qwen_model.model(input_ids=input_ids, output_attentions=True)
+            base_output = enthu_qwen(input_ids=input_ids, output_attentions=True)
             attention_map = base_output.attentions
-            # Shape of base_output.attentions is (batch_size, num_heads, sequence_length, sequence_length) for each layer
-
         # Calculate importance values once per method per chunk
         importance_values_dict = {}
         for method in methods:
             importance_values_dict[method] = get_importance_order(method, attention_map, total_num_layers,
                                                                   attention_head_weights)
-
         num_valid_tokens = (target_ids != -100).sum().item()  # number of valid tokens in target_ids
         batch_size = target_ids.size(0)
         num_loss_tokens = num_valid_tokens - batch_size  # subtract batch_size due to internal label shift
@@ -134,18 +134,16 @@ if __name__ == "__main__":
             importance_values = importance_values_dict[method]
             for l, layer_of_interest in enumerate(layers_of_interest):
                 for r, ratio in enumerate(ratios):
-                    with torch.no_grad():
-                        neg_log_likelihood = qwen_model.activation_quantization(input_ids, target_ids,
-                                                                                importance_values[layer_of_interest],
-                                                                                ratio, layer_of_interest)
-                    # Accumulate the NLL directly
-                    total_nll[m][l][r] += neg_log_likelihood.item() * num_loss_tokens
+                    neg_log_likelihood = qwen_model.activation_quantization(input_ids, target_ids,
+                                                                            importance_values[layer_of_interest],
+                                                                            ratio, layer_of_interest)
+                    total_nll[m][l][r] += (neg_log_likelihood.item() * num_loss_tokens)
 
         n_tokens += num_loss_tokens
 
         prev_end_loc = end_loc
 
-        if iterations % 100 == 0:
+        if iterations % 1000 == 0:
             print(f"Processed {iterations} chunks")
             print(f"Total NLL: {total_nll}")
             print(f"Total tokens: {n_tokens}")
@@ -155,9 +153,10 @@ if __name__ == "__main__":
             with open('n_tokens.pkl', 'wb') as f:
                 pickle.dump(n_tokens, f)
 
+        iterations += 1
+
         if end_loc == seq_len:
             break
-
     avg_ppl_results = [[[0. for _ in range(len(ratios))] for __ in range(len(layers_of_interest))] for ___ in
                        range(len(methods))]
 
