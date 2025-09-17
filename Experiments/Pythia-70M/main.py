@@ -1,3 +1,20 @@
+"""
+Quantization Impact Analysis on Pythia 70M Model
+
+This script explores the effects of various quantization strategies on the Pythia 70M language model
+by analyzing different importance calculation schemes for token activations. It implements multiple
+quantization approaches and evaluates their impact on model performance.
+
+Parameters:
+    ratios (list[float]): List of quantization ratios (0 to 10) to apply to activations. The actual value would be 0.1 * ratio.
+    layers_of_interest (list[Union[int, str]]): Layers to analyze, can include specific layer
+        indices or special values like 'aggregate upto 2', 'maximum aggregation', 'upto ratio'
+
+In aggregate upto 2, we aggregate the importance scores of the  first two layers and then use this combined value.
+In upto ratio, we try to only retain the tokens that correspond to 1 - ratio amount of the total importance score.
+The rest are quantized.
+"""
+
 # Requisite imports
 import json
 from tqdm import tqdm
@@ -6,12 +23,6 @@ import torch
 from pythia_model import Pythia70Model
 import numpy as np
 import math
-
-
-# Identify the dataset
-# Let us use wikitext or something?
-
-# We will use the  pile test dataset in a streaming way
 
 def extract_attentions(attention_weights, interesting_layers):
     # Define a dictionary called per_seq_ordering that corresponds to the different layers mentioned in layers of interest.

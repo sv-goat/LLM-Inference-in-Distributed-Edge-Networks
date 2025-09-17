@@ -1,10 +1,26 @@
+"""
+Pythia 70M Model Wrapper for Quantization Experiments
+
+This module provides a wrapper around the Pythia 70M model, specifically designed
+for quantization experiments. It implements methods for quantization-aware forward
+passes and loss calculation.
+"""
+
 # Requisite imports
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
-
-# I want to pass through the model layer by layer.
 class Pythia70Model:
+    """
+    A wrapper class for the Pythia 70M model that supports quantization experiments.
+
+    This class provides an interface to the Pythia 70M model with additional functionality
+    for quantization experiments, including batched processing and custom loss calculation.
+
+    Args:
+        device (str): The device to run the model on ('cuda' or 'cpu')
+        ratios (list[int]): List of quantization ratios to evaluate (0-10, where 1 = 10%)
+    """
     def __init__(self, device, ratios) -> None:
         self.model = AutoModelForCausalLM.from_pretrained('EleutherAI/pythia-70m-deduped')
         tokenizer = AutoTokenizer.from_pretrained('EleutherAI/pythia-70m-deduped')
@@ -24,14 +40,14 @@ class Pythia70Model:
             # Since we do not have targets for the last token, we need to shift those as well
             logits = logits[:, :-1, :]
 
-            # I want seperate nll for each of the batches
+            # Get separate NLLs for each batch.
             batched_nll = []
             for ratio in self.ratios:
                 cross_entropy = torch.nn.functional.cross_entropy(logits[ratio, :, :].view(-1, logits.size(-1)),
                                                                   target.view(-1), ignore_index=- 100)
                 batched_nll.append(cross_entropy)
 
-        # Return the scalar negative log likelihood
+            # Return the scalar negative log likelihood
             return batched_nll
 
 
@@ -48,15 +64,14 @@ class Pythia70Model:
             hidden_states[ratio, token, :] = unquantized_activation_for_token
         return hidden_states
 
+    # Implementation of upto ratio method from params.json
     def batched_top_rho_quantization(self, batched_input_tokens, distribution, target, quant_layer=2, do_quant=True):
         # input ids have shape batch size x num tokens
         batched_input_tokens = batched_input_tokens.to(self.device)
-        # Get the model
         gpt_neox = self.model.base_model
         rotary_emb = gpt_neox.rotary_emb
 
         with torch.no_grad():
-            # Get the hidden states
             hidden_states = gpt_neox.embed_in(batched_input_tokens)
             # Create position embeddings of shape batch_size , seq _len
             # Value of the position embeddings should be between 0 and the number of positions -1
@@ -64,20 +79,19 @@ class Pythia70Model:
                                         device=batched_input_tokens.device).unsqueeze(0).expand(
                 batched_input_tokens.size(0), -1)
             position_embeddings = rotary_emb(hidden_states, position_ids)
-            # How many layers
+            # Six layers present in Pythia 70M, hence hardcoding 6 here.
             for i in range(6):
                 layer = gpt_neox.layers[i]
                 hidden_states = layer(hidden_states, position_embeddings=position_embeddings)[0]
-                # What is the shape of this hidden states?
+                # Shape at this stage
                 # ( batch, num_input_tokens, model_dim = 512 )
 
                 if i == quant_layer and do_quant:
-                    # I'll only quantize the activations according to some measure of importance
-                    # ( batch, num_input_tokens, model_dim = 512 )
                     for ratio in self.ratios:
                         # First, let us define the threshold that we want to reach.
                         threshold = 1 - 0.1 * ratio
-                        # Now, we want to choose the fewest indices that can add upto this threshold from the given distribution
+                        # Now, we want to choose the fewest indices that can add upto this threshold from the
+                        # given distribution
                         sorted_distribution_with_indices = sorted(enumerate(distribution), key=lambda x: x[1],
                                                                   reverse=True)
                         total = 0
@@ -91,7 +105,7 @@ class Pythia70Model:
                         tokens_to_quantize = sorted_distribution_with_indices[final_index + 1:]
                         tokens_to_quantize = [t[0] for t in tokens_to_quantize]
 
-                        # Now that we have the tokens to quantize, we just simply have to follow the other function from here.
+                        # Now that we have the tokens to quantize, the rest of the steps are the same.
                         hidden_states = self.simulate_quantization(tokens_to_quantize, hidden_states, ratio)
 
             return self.calculate_batched_nll( hidden_states, target)
@@ -99,7 +113,7 @@ class Pythia70Model:
     def batched_quantization_helper(self, batched_input_tokens, ordering, target, quant_layer=2, do_quant=True):
         # input ids have shape batch size x num tokens
         batched_input_tokens = batched_input_tokens.to(self.device)
-        # Get the model
+
         gpt_neox = self.model.base_model
         rotary_emb = gpt_neox.rotary_emb
 
@@ -113,20 +127,16 @@ class Pythia70Model:
                                         device=batched_input_tokens.device).unsqueeze(0).expand(
                 batched_input_tokens.size(0), -1)
             position_embeddings = rotary_emb(hidden_states, position_ids)
-            # How many layers
+            # 6 = number of layers in Pythia 70M
             for i in range(6):
                 layer = gpt_neox.layers[i]
                 hidden_states = layer(hidden_states, position_embeddings=position_embeddings)[0]
-                # What is the shape of this hidden states?
+                # Shape right now
                 # ( batch, num_input_tokens, model_dim = 512 )
 
                 if i == quant_layer and do_quant:
-                    # I'll only quantize the activations according to some measure of importance
-                    # ( batch, num_input_tokens, model_dim = 512 )
                     for ratio in self.ratios:
                         tokens_to_quantize = ordering[:int(0.1 * ratio * len(ordering))]
-                        # Accumulate the negative log likelihoods
-
                         hidden_states = self.simulate_quantization(tokens_to_quantize, hidden_states, ratio)
 
             return self.calculate_batched_nll( hidden_states, target)

@@ -1,3 +1,13 @@
+"""
+Attention Head Relevance Analysis for Qwen2-0.5B
+
+This script analyzes the relevance of attention heads in the Qwen2-0.5B model using Layer-wise
+Relevance Propagation (LRP). It captures and analyzes attention patterns to understand which
+tokens and heads are most influential in the model's predictions.
+
+The script will process the wikitext dataset and save attention patterns and relevance scores.
+"""
+
 import torch
 from transformers import AutoTokenizer
 from transformers.models.qwen2 import modeling_qwen2
@@ -6,16 +16,23 @@ from lxt.efficient import monkey_patch
 from datasets import load_dataset
 
 from tqdm import tqdm
-
-import random
-
 import json
 
 def hook_attention_output(module, input, output):
-    # Assuming the attention output is the second element in the output tuple
+    """
+    Hook function to capture and store attention outputs during forward pass.
+    
+    This hook is attached to attention modules to capture their outputs for analysis.
+    It stores the attention weights and ensures gradients are preserved for LRP.
+    
+    Args:
+        module: The attention module being hooked
+        input: Input to the attention module
+        output: Output from the attention module (tuple containing attention output and weights)
+    """
+    # This assumes the attention weights are the second element in the tuple
     if isinstance(output, tuple) and len(output) > 1:
-        # save the attention output and make sure the gradient is also saved
-        # This assumes the attention weights are the second element in the tuple
+        # Save the attention output and make sure the gradient is also saved
         attention_output = output[1]
         module.attention_output = attention_output
         module.attention_output.retain_grad() if module.attention_output.requires_grad else None
@@ -29,7 +46,7 @@ if __name__ == "__main__":
     encodings = tokenizer("\n\n".join(wikitext_test["text"]), return_tensors="pt", add_special_tokens=True)
 
     # Load the params
-    with open("params.json", "r") as f:
+    with open("../Pythia-70M/params.json", "r") as f:
         params = json.load(f)
 
     max_length = params["max_length"]
@@ -41,15 +58,15 @@ if __name__ == "__main__":
     model = modeling_qwen2.Qwen2ForCausalLM.from_pretrained('Qwen/Qwen2-0.5B', device_map='cuda',
                                                             attn_implementation="eager")
 
-    # optional gradient checkpointing to save memory (2x forward pass)
+    # Optional gradient checkpointing to save memory (2x forward pass)
     model.train()
     model.gradient_checkpointing_enable()
 
-    # deactive gradients on parameters to save memory
+    # Deactivate gradients certain on parameters to save memory
     for param in model.parameters():
         param.requires_grad = False
 
-    # apply hooks
+    # Apply hooks
     for layer in model.model.layers:
         # We need to hook the attention module within each layer
         layer.self_attn.register_forward_hook(hook_attention_output)
@@ -73,7 +90,7 @@ if __name__ == "__main__":
         for i, layer in enumerate(model.model.layers):
             # Extract attention weights from the hooked module
             if hasattr(layer.self_attn, 'attention_output') and layer.self_attn.attention_output is not None:
-                # Assuming attention_output is (batch_size, num_heads, sequence_length, sequence_length)
+                # attention_output is (batch_size, num_heads, sequence_length, sequence_length)
                 # We'll take the mean across heads and batch size for simplicity
                 # Get the relevance scores corresponding to the attention neurons
                 relevance = (layer.self_attn.attention_output * layer.self_attn.attention_output.grad).float()
@@ -84,8 +101,6 @@ if __name__ == "__main__":
                         tensor = head.float().sum()
                         # Write the scalar value to heads
                         attention_head_weights[i][j] += tensor.cpu().item()
-
-
             else:
                 print("No attention output found for layer", i)
 
@@ -103,7 +118,7 @@ if __name__ == "__main__":
             layer_weights[i] /= layer_sum if layer_sum != 0 else 1e-9
 
     # Now attention_head_weights contains the weights normalized within each layer, summing to 1
-    print("Normalized relevance sccores for attention head (per layer, summing to 1):")
+    print("Normalized relevance scores for attention head (per layer, summing to 1):")
     # Print everything.
     for i in range(len(attention_head_weights)):
         print(f"Layer {i}: {attention_head_weights[i]}")
@@ -111,5 +126,3 @@ if __name__ == "__main__":
     # Save the weights
     with open("attention_head_weights.json", "w") as f:
         json.dump(attention_head_weights, f)
-
-
