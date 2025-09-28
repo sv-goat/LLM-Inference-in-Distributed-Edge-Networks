@@ -22,7 +22,7 @@ class Pythia70Model:
         ratios (list[int]): List of quantization ratios to evaluate (0-10, where 1 = 10%)
     """
     def __init__(self, device, ratios) -> None:
-        self.model = AutoModelForCausalLM.from_pretrained('EleutherAI/pythia-70m')
+        self.model = AutoModelForCausalLM.from_pretrained('EleutherAI/pythia-70m', attn_implementation = "sdpa")
         tokenizer = AutoTokenizer.from_pretrained('EleutherAI/pythia-70m')
         self.tokenizer = tokenizer
         self.model.to(device)
