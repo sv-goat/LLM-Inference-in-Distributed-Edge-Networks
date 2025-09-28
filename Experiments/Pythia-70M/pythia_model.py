@@ -22,13 +22,16 @@ class Pythia70Model:
         ratios (list[int]): List of quantization ratios to evaluate (0-10, where 1 = 10%)
     """
     def __init__(self, device, ratios) -> None:
-        self.model = AutoModelForCausalLM.from_pretrained('EleutherAI/pythia-70m-deduped')
-        tokenizer = AutoTokenizer.from_pretrained('EleutherAI/pythia-70m-deduped')
+        self.model = AutoModelForCausalLM.from_pretrained('EleutherAI/pythia-70m')
+        tokenizer = AutoTokenizer.from_pretrained('EleutherAI/pythia-70m')
         self.tokenizer = tokenizer
         self.model.to(device)
         self.device = device
-        self.ratios = ratios
+        self.num_layers = len(self.model.base_model.layers)
+        self.gpt_neox = self.model.base_model
         self.final_layer_norm = self.model.gpt_neox.final_layer_norm
+        self.rotary_emb = self.gpt_neox.rotary_emb
+        self.ratios = ratios
 
     def calculate_batched_nll(self, hidden_states, target):
         with torch.no_grad():
@@ -140,3 +143,64 @@ class Pythia70Model:
                         hidden_states = self.simulate_quantization(tokens_to_quantize, hidden_states, ratio)
 
             return self.calculate_batched_nll( hidden_states, target)
+
+    def move_to_device(self):
+        self.model.to(self.device)
+
+    def remove_from_device(self):
+        self.model.to("cpu")
+
+    def activation_quantization(self, batched_input_tokens, target, importance_values, ratio, layer_of_interest):
+        batched_input_tokens = batched_input_tokens.to(self.device)
+
+        with torch.no_grad():
+            hidden_states = self.gpt_neox.embed_in(batched_input_tokens)
+            position_ids = torch.arange(batched_input_tokens.size(1), dtype=torch.long,
+                                        device=batched_input_tokens.device).unsqueeze(0).expand(
+                batched_input_tokens.size(0), -1)
+            position_embeddings = self.rotary_emb(hidden_states, position_ids)
+            # How many layers
+            for i in range(self.num_layers):
+                layer = self.gpt_neox.layers[i]
+                hidden_states = layer(hidden_states, position_embeddings=position_embeddings)[0]
+                # Now, let us do the quantization.
+                if i == layer_of_interest and ratio > 0:
+                    # Get the ratio amount of the least important token positions
+                    least_important_token_positions = torch.argsort(importance_values, descending=False)[
+                                                      :int(ratio * batched_input_tokens.size(1))]
+                    # Quantize the hidden state activations corresponding to these token positions.
+                    # Also, need the shape of the hidden states.
+                    # Batch x seq x hidden_size
+                    # Simulate symmetric 4-bit integer quantization
+                    # Determine the maximum absolute value for scaling
+                    max_val = torch.max(torch.abs(hidden_states[:, least_important_token_positions, :]))
+                    # Scale the values to the range of 4-bit signed integers (-8 to 7)
+                    # Number of levels is 2^4 = 16. For symmetric, we use range -2^(bits-1) to 2^(bits-1)-1
+                    num_levels = 16
+                    scaled_values = torch.clamp(
+                        hidden_states[:, least_important_token_positions, :] / max_val * (num_levels / 2 - 1),
+                        -(num_levels / 2), (num_levels / 2 - 1))
+                    # Round to the nearest integer
+                    quantized_values = torch.round(scaled_values)
+                    # Scale back to the original range
+                    dequantized_hidden_states = quantized_values / (num_levels / 2 - 1) * max_val
+
+                    hidden_states[:, least_important_token_positions, :] = dequantized_hidden_states
+
+                    ### NOTE: THIS IS A SIMPLIFIED SIMULATION OF SYMMETRIC INT4 QUANTIZATION.
+                    ### REAL QUANTIZATION INVOLVES MORE NUANCES.
+
+            post_norm = self.final_layer_norm(hidden_states)
+            logits = self.model.embed_out(post_norm)
+            # logits shape: (batch_size, seq_len, vocab_size)
+            # targets are just the inputs. so, there is a need to shift them by 1
+            target = target[:, 1:]
+            # Since we do not have targets for the last token, we need to shift those as well
+            logits = logits[:, :-1, :]
+
+            # Calculate Cross entropy loss, which is the NLL in perplexity calculation
+            cross_entropy = torch.nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), target.view(-1),
+                                                              ignore_index=- 100)
+
+        # Return the scalar negative log likelihood
+        return cross_entropy

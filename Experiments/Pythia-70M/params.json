@@ -1,5 +1,6 @@
 {
-    "ratios": [0, 1, 2, 3, 4, 5],
-    "layers_of_interest": [2, 3, 5, "aggregate upto 2", "maximum aggregation", "upto ratio"],
-    "stride": 32
+    "ratios": [0, 0.25, 0.5, 0.75, 1],
+    "layers_of_interest": [1, 2, 4, 5],
+    "stride": 32,
+    "experiment": "last_row"
 }
