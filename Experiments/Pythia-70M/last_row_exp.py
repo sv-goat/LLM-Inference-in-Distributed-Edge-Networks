@@ -56,12 +56,12 @@ def last_row_exp(params):
 
     device = "cuda"
 
-    ratios = params.ratios
+    ratios = params["ratios"]
 
-    layers_of_interest = params.layers_of_interest
+    layers_of_interest = params["layers_of_interest"]
 
     # The 5 methods
-    methods = params.methods
+    methods = params["methods"]
 
     pythia_model = Pythia70Model(device, ratios)
 

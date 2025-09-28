@@ -2,5 +2,6 @@
     "ratios": [0, 0.25, 0.5, 0.75, 1],
     "layers_of_interest": [1, 2, 4, 5],
     "stride": 32,
-    "experiment": "last_row"
+    "experiment": "last_row",
+    "methods": ["regular_importance", "last_row", "aggregate_till"]
 }
