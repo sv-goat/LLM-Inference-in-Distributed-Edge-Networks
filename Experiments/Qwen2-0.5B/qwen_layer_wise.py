@@ -14,7 +14,7 @@ class QwenPointFiveBModel:
         device (str): The device to run the model on ('cuda' or 'cpu')
     """
     def __init__(self, device) -> None:
-        self.model = AutoModelForCausalLM.from_pretrained('Qwen/Qwen2-0.5B')
+        self.model = AutoModelForCausalLM.from_pretrained('Qwen/Qwen2-0.5B', attn_implementation = "sdpa")
         tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen2-0.5B')
         self.tokenizer = tokenizer
         self.model.to(device)
