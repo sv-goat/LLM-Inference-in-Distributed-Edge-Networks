@@ -39,7 +39,6 @@ def get_importance_order(method, attention_map, num_layers):
       res.append(aggregate_importance / (l + 1))
     elif method == "random":
       # Random importance values - generate random values that will result in random token selection
-      # when sorted in ascending order (least important first)
       seq_len = attention_map[l].shape[-1]
       random_importance = torch.rand(seq_len)
       res.append(random_importance)
