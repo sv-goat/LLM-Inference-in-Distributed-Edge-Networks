@@ -3,5 +3,5 @@
     "layers_of_interest": [1, 2, 4, 5],
     "stride": 32,
     "experiment": "last_row",
-    "methods": ["regular_importance", "last_row", "aggregate_till"]
+    "methods": ["regular_importance", "last_row", "aggregate_till", "random"]
 }
