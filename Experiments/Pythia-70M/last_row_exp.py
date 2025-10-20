@@ -4,6 +4,8 @@ from tqdm import tqdm
 from datasets import load_dataset
 import torch
 import math
+import os
+from datetime import datetime
 from pythia_model import Pythia70Model
 
 def get_importance_order(method, attention_map, num_layers):
@@ -50,6 +52,17 @@ def get_importance_order(method, attention_map, num_layers):
   return res
 
 def last_row_exp(params):
+    # Create timestamped directory for this experiment
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    exp_dir = f"experiment_{timestamp}"
+    os.makedirs(exp_dir, exist_ok=True)
+    
+    # Copy params.json to the experiment directory
+    import shutil
+    shutil.copy("params.json", os.path.join(exp_dir, "params.json"))
+    
+    print(f"Experiment directory created: {exp_dir}")
+    print(f"Results will be saved in: {os.path.abspath(exp_dir)}")
 
     wikitext = load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")
 
@@ -59,7 +72,13 @@ def last_row_exp(params):
     # Join the entire wikitext test corpus
     encodings = tokenizer("\n\n".join(wikitext["text"]), return_tensors="pt")
 
-    device = "cuda"
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    print(f"Using device: {device}")
 
     ratios = params["ratios"]
 
@@ -124,9 +143,9 @@ def last_row_exp(params):
             print(f"Total NLL: {total_nll}")
             print(f"Total tokens: {n_tokens}")
             # Save the total_nll and n_tokens to a file
-            with open('total_nll_pythia_70m.pkl', 'wb') as f:
+            with open(os.path.join(exp_dir, 'total_nll_pythia_70m.pkl'), 'wb') as f:
                 pickle.dump(total_nll, f)
-            with open('n_tokens_pythia_70m.pkl', 'wb') as f:
+            with open(os.path.join(exp_dir, 'n_tokens_pythia_70m.pkl'), 'wb') as f:
                 pickle.dump(n_tokens, f)
 
         iterations += 1
@@ -144,8 +163,16 @@ def last_row_exp(params):
 
     print("Average ppl results", avg_ppl_results)
 
-    with open('avg_ppl_results_pythia_70m.pkl', 'wb') as f:
+    with open(os.path.join(exp_dir, 'avg_ppl_results_pythia_70m.pkl'), 'wb') as f:
         pickle.dump(avg_ppl_results, f)
+    
+    print(f"\n=== EXPERIMENT COMPLETED ===")
+    print(f"Results saved in: {os.path.abspath(exp_dir)}")
+    print(f"Files created:")
+    print(f"  - params.json")
+    print(f"  - avg_ppl_results_pythia_70m.pkl")
+    print(f"  - total_nll_pythia_70m.pkl")
+    print(f"  - n_tokens_pythia_70m.pkl")
 
 
 

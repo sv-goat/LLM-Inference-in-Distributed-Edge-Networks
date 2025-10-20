@@ -23,6 +23,9 @@ import torch
 from pythia_model import Pythia70Model
 import numpy as np
 import math
+import os
+import shutil
+from datetime import datetime
 
 def extract_attentions(attention_weights, interesting_layers):
     # Define a dictionary called per_seq_ordering that corresponds to the different layers mentioned in layers of interest.
@@ -72,11 +75,27 @@ def extract_attentions(attention_weights, interesting_layers):
     return calculated_orderings
 
 def initial_exp(params):
+    # Create timestamped directory for this experiment
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    exp_dir = f"experiment_{timestamp}"
+    os.makedirs(exp_dir, exist_ok=True)
+    
+    # Copy params.json to the experiment directory
+    shutil.copy("params.json", os.path.join(exp_dir, "params.json"))
+    
+    print(f"Experiment directory created: {exp_dir}")
+    print(f"Results will be saved in: {os.path.abspath(exp_dir)}")
+
     wikitext = load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")
 
     # Define the model and the tokenizer
-    device = "cuda"
-    print("Using device: ", device)
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    print(f"Using device: {device}")
 
     ratios = params["ratios"]
     pythia_model = Pythia70Model(device, ratios)
@@ -133,5 +152,11 @@ def initial_exp(params):
             ppl = math.exp(total_nlls[l][ratio])
             print("Layer", l, "Ratio", 0.1 * ratio, "PPL", ppl)
 
-    with open('exp_1.json', 'w') as fp:
+    with open(os.path.join(exp_dir, 'exp_1.json'), 'w') as fp:
         json.dump(total_nlls, fp)
+    
+    print(f"\n=== EXPERIMENT COMPLETED ===")
+    print(f"Results saved in: {os.path.abspath(exp_dir)}")
+    print(f"Files created:")
+    print(f"  - params.json")
+    print(f"  - exp_1.json")
